@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard - Sistema de Automação</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+        }
+
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.3s;
+        }
+
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .upload-section {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+
+        .upload-section h2 {
+            color: #333;
+            margin-bottom: 1rem;
+        }
+
+        .file-upload {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+
+        .file-input {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .file-input-label {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            background: #3498db;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .file-input-label:hover {
+            background: #2980b9;
+        }
+
+        .upload-btn {
+            padding: 0.75rem 2rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: transform 0.2s;
+            align-self: flex-start;
+        }
+
+        .upload-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .upload-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-section {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .status-card {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 8px;
+            text-align: center;
+            border-left: 4px solid #667eea;
+        }
+
+        .status-card.success {
+            border-left-color: #27ae60;
+        }
+
+        .status-card.error {
+            border-left-color: #e74c3c;
+        }
+
+        .status-card.total {
+            border-left-color: #3498db;
+        }
+
+        .status-card h3 {
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+
+        .status-card .number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .status-card.success .number {
+            color: #27ae60;
+        }
+
+        .status-card.error .number {
+            color: #e74c3c;
+        }
+
+        .status-card.total .number {
+            color: #3498db;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #ecf0f1;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .logs-section {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .logs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .logs-container {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 1rem;
+            border-radius: 5px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .log-entry {
+            margin-bottom: 0.5rem;
+            padding: 0.25rem 0;
+        }
+
+        .log-entry.success {
+            color: #2ecc71;
+        }
+
+        .log-entry.error {
+            color: #e74c3c;
+        }
+
+        .clear-logs-btn {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .clear-logs-btn:hover {
+            background: #c0392b;
+        }
+
+        .message {
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+        }
+
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .running-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #27ae60;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .file-name {
+            margin-top: 0.5rem;
+            color: #666;
+            font-style: italic;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 0 1rem;
+            }
+
+            .header {
+                padding: 1rem;
+            }
+
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏠 Dashboard - Sistema de Automação</h1>
+        <a href="/logout" class="logout-btn">Sair</a>
+    </div>
+
+    <div class="container">
+        <!-- Seção de Upload -->
+        <div class="upload-section">
+            <h2>📁 Upload de Planilha</h2>
+            <div class="file-upload">
+                <div class="file-input-wrapper">
+                    <input type="file" id="fileInput" class="file-input" accept=".xlsx,.xls">
+                    <label for="fileInput" class="file-input-label">Escolher Arquivo Excel</label>
+                </div>
+                <div class="file-name" id="fileName"></div>
+                <button id="uploadBtn" class="upload-btn" disabled>Iniciar Automação</button>
+            </div>
+            <div id="uploadMessage"></div>
+        </div>
+
+        <!-- Seção de Status -->
+        <div class="status-section">
+            <h2>📊 Status da Automação</h2>
+            <div class="status-grid">
+                <div class="status-card total">
+                    <h3>Total de Registros</h3>
+                    <div class="number" id="totalRecords">0</div>
+                </div>
+                <div class="status-card">
+                    <h3>Registro Atual</h3>
+                    <div class="number" id="currentRecord">0</div>
+                </div>
+                <div class="status-card success">
+                    <h3>Sucessos</h3>
+                    <div class="number" id="successCount">0</div>
+                </div>
+                <div class="status-card error">
+                    <h3>Erros</h3>
+                    <div class="number" id="errorCount">0</div>
+                </div>
+            </div>
+
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressBar"></div>
+            </div>
+
+            <div id="runningStatus" style="display: none;">
+                <span class="running-indicator"></span>
+                <strong>Automação em execução...</strong>
+            </div>
+        </div>
+
+        <!-- Seção de Logs -->
+        <div class="logs-section">
+            <div class="logs-header">
+                <h2>📝 Logs em Tempo Real</h2>
+                <button id="clearLogsBtn" class="clear-logs-btn">Limpar Logs</button>
+            </div>
+            <div class="logs-container" id="logsContainer">
+                <div class="log-entry">Sistema pronto para uso...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let statusInterval;
+
+        // Elementos DOM
+        const fileInput = document.getElementById('fileInput');
+        const fileName = document.getElementById('fileName');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const uploadMessage = document.getElementById('uploadMessage');
+        const logsContainer = document.getElementById('logsContainer');
+        const clearLogsBtn = document.getElementById('clearLogsBtn');
+
+        // Status elements
+        const totalRecords = document.getElementById('totalRecords');
+        const currentRecord = document.getElementById('currentRecord');
+        const successCount = document.getElementById('successCount');
+        const errorCount = document.getElementById('errorCount');
+        const progressBar = document.getElementById('progressBar');
+        const runningStatus = document.getElementById('runningStatus');
+
+        // File input handler
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                fileName.textContent = `Arquivo selecionado: ${file.name}`;
+                uploadBtn.disabled = false;
+            } else {
+                fileName.textContent = '';
+                uploadBtn.disabled = true;
+            }
+        });
+
+        // Upload handler
+        uploadBtn.addEventListener('click', function() {
+            const file = fileInput.files[0];
+            if (!file) {
+                showMessage('Selecione um arquivo primeiro!', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Enviando...';
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showMessage(data.message, 'success');
+                    startStatusUpdates();
+                } else {
+                    showMessage(data.error, 'error');
+                    uploadBtn.disabled = false;
+                    uploadBtn.textContent = 'Iniciar Automação';
+                }
+            })
+            .catch(error => {
+                showMessage('Erro ao enviar arquivo: ' + error.message, 'error');
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Iniciar Automação';
+            });
+        });
+
+        // Clear logs handler
+        clearLogsBtn.addEventListener('click', function() {
+            logsContainer.innerHTML = '<div class="log-entry">Logs limpos...</div>';
+        });
+
+        // Show message function
+        function showMessage(message, type) {
+            uploadMessage.innerHTML = `<div class="message ${type}">${message}</div>`;
+            setTimeout(() => {
+                uploadMessage.innerHTML = '';
+            }, 5000);
+        }
+
+        // Start status updates
+        function startStatusUpdates() {
+            if (statusInterval) {
+                clearInterval(statusInterval);
+            }
+
+            statusInterval = setInterval(updateStatus, 1000);
+        }
+
+        // Update status function
+        function updateStatus() {
+            fetch('/status')
+            .then(response => response.json())
+            .then(data => {
+                // Update counters
+                totalRecords.textContent = data.total_records;
+                currentRecord.textContent = data.current_record;
+                successCount.textContent = data.success_count;
+                errorCount.textContent = data.error_count;
+
+                // Update progress bar
+                const progress = data.total_records > 0 ? 
+                    (data.current_record / data.total_records) * 100 : 0;
+                progressBar.style.width = progress + '%';
+
+                // Update running status
+                if (data.running) {
+                    runningStatus.style.display = 'block';
+                    uploadBtn.disabled = true;
+                    uploadBtn.textContent = 'Automação em Execução...';
+                } else {
+                    runningStatus.style.display = 'none';
+                    uploadBtn.disabled = false;
+                    uploadBtn.textContent = 'Iniciar Automação';
+
+                    if (statusInterval && data.current_record > 0) {
+                        clearInterval(statusInterval);
+                        statusInterval = null;
+                    }
+                }
+
+                // Update logs
+                updateLogs(data.logs);
+            })
+            .catch(error => {
+                console.error('Erro ao atualizar status:', error);
+            });
+        }
+
+        // Update logs function
+        function updateLogs(logs) {
+            const currentLogs = logsContainer.children.length;
+            const newLogs = logs.length;
+
+            if (newLogs > currentLogs) {
+                for (let i = currentLogs; i < newLogs; i++) {
+                    const logEntry = document.createElement('div');
+                    logEntry.className = 'log-entry';
+
+                    const logText = logs[i];
+                    if (logText.includes('✓') || logText.includes('sucesso')) {
+                        logEntry.classList.add('success');
+                    } else if (logText.includes('✗') || logText.includes('Erro')) {
+                        logEntry.classList.add('error');
+                    }
+
+                    logEntry.textContent = logText;
+                    logsContainer.appendChild(logEntry);
+                }
+
+                // Scroll to bottom
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+        }
+
+        // Initial status update
+        updateStatus();
+    </script>
+</body>
+</html>
