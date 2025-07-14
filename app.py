@@ -1,7 +1,6 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from werkzeug.utils import secure_filename
 import os
-import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -13,6 +12,7 @@ import time
 import threading
 import json
 from datetime import datetime
+from openpyxl import load_workbook
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'helton1985_21081985@_secret_key')
@@ -66,7 +66,6 @@ class QuintoAndarAutomation:
                 from webdriver_manager.chrome import ChromeDriverManager
                 service = Service(ChromeDriverManager().install())
             except:
-                # Fallback para sistemas que já têm chromedriver instalado
                 service = Service('/usr/bin/chromedriver')
             
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -82,7 +81,6 @@ class QuintoAndarAutomation:
         try:
             self.driver.get("https://indicaai.quintoandar.com.br/")
             time.sleep(5)
-            # Verificar se a página carregou
             self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             return True
         except Exception as e:
@@ -92,20 +90,15 @@ class QuintoAndarAutomation:
     def check_phone_exists(self, phone):
         """Verifica se o telefone já está cadastrado"""
         try:
-            # Limpar e formatar telefone
             phone = str(phone).replace('+55', '').replace('55', '').replace('-', '').replace('(', '').replace(')', '').replace(' ', '').strip()
             
-            # Múltiplos seletores para campo de telefone
             phone_selectors = [
                 "input[type='tel']",
                 "input[placeholder*='telefone' i]",
                 "input[placeholder*='celular' i]",
                 "input[name*='phone' i]",
                 "input[name*='telefone' i]",
-                "input[name*='celular' i]",
-                "input[id*='phone' i]",
-                "input[id*='telefone' i]",
-                "input[id*='celular' i]"
+                "input[name*='celular' i]"
             ]
             
             phone_field = None
@@ -123,13 +116,11 @@ class QuintoAndarAutomation:
                 log_message("❌ Campo de telefone não encontrado")
                 return False
             
-            # Limpar campo e inserir telefone
             phone_field.clear()
             time.sleep(1)
             phone_field.send_keys(phone)
             time.sleep(3)
 
-            # Verificar mensagens de erro ou validação
             error_selectors = [
                 ".error", ".alert", "[class*='error' i]", "[class*='alert' i]",
                 ".notification", ".message", "[class*='notification' i]",
@@ -160,10 +151,7 @@ class QuintoAndarAutomation:
                 "input[placeholder*='endereço' i]",
                 "input[placeholder*='endereco' i]",
                 "input[name*='address' i]",
-                "input[name*='endereco' i]",
-                "input[id*='address' i]",
-                "input[id*='endereco' i]",
-                "input[type='text'][placeholder*='rua' i]"
+                "input[name*='endereco' i]"
             ]
             
             address_field = None
@@ -184,15 +172,11 @@ class QuintoAndarAutomation:
                 address_field.send_keys(full_address)
                 time.sleep(4)
 
-                # Tentar selecionar primeira sugestão
                 suggestion_selectors = [
                     ".suggestion", ".autocomplete-item", "[role='option']",
-                    ".dropdown-item", ".search-result", ".address-suggestion",
-                    ".pac-item", ".pac-container .pac-item",
-                    "[class*='suggestion' i]", "[class*='autocomplete' i]"
+                    ".dropdown-item", ".search-result", ".address-suggestion"
                 ]
                 
-                suggestion_found = False
                 for selector in suggestion_selectors:
                     try:
                         suggestions = self.driver.find_elements(By.CSS_SELECTOR, selector)
@@ -200,27 +184,15 @@ class QuintoAndarAutomation:
                         if visible_suggestions:
                             visible_suggestions[0].click()
                             time.sleep(2)
-                            suggestion_found = True
                             break
                     except:
                         continue
-                
-                if not suggestion_found:
-                    # Tentar pressionar Enter se não houver sugestões
-                    try:
-                        from selenium.webdriver.common.keys import Keys
-                        address_field.send_keys(Keys.ENTER)
-                        time.sleep(2)
-                    except:
-                        pass
 
             # 2. Preencher complemento
             complement_selectors = [
                 "input[placeholder*='complemento' i]",
                 "input[name*='complement' i]",
-                "input[name*='complemento' i]",
-                "input[id*='complement' i]",
-                "input[id*='complemento' i]"
+                "input[name*='complemento' i]"
             ]
             
             for selector in complement_selectors:
@@ -241,13 +213,9 @@ class QuintoAndarAutomation:
                 "input[placeholder*='proprietario' i]",
                 "input[name*='owner' i]",
                 "input[name*='proprietario' i]",
-                "input[name*='nome' i]",
-                "input[id*='owner' i]",
-                "input[id*='proprietario' i]",
-                "input[id*='nome' i]"
+                "input[name*='nome' i]"
             ]
             
-            owner_filled = False
             for selector in owner_selectors:
                 try:
                     owner_field = self.wait.until(
@@ -257,21 +225,16 @@ class QuintoAndarAutomation:
                         owner_field.clear()
                         time.sleep(1)
                         owner_field.send_keys(data.get('proprietario', ''))
-                        owner_filled = True
                         break
                 except:
                     continue
-            
-            if not owner_filled:
-                log_message("⚠️ Campo proprietário não encontrado")
 
             # 4. Preencher email se disponível
             if data.get('email'):
                 email_selectors = [
                     "input[type='email']",
                     "input[placeholder*='email' i]",
-                    "input[name*='email' i]",
-                    "input[id*='email' i]"
+                    "input[name*='email' i]"
                 ]
                 
                 for selector in email_selectors:
@@ -298,10 +261,7 @@ class QuintoAndarAutomation:
                 "input[type='submit']",
                 ".btn-submit",
                 "[class*='submit' i]",
-                ".submit-btn",
-                "button:contains('Enviar')",
-                "button:contains('Cadastrar')",
-                "button:contains('Indicar')"
+                ".submit-btn"
             ]
             
             submit_button = None
@@ -319,11 +279,9 @@ class QuintoAndarAutomation:
                 submit_button.click()
                 time.sleep(5)
 
-                # Verificar sinais de sucesso
                 success_selectors = [
                     ".success", ".confirmation", "[class*='success' i]",
-                    ".thank-you", "[class*='thank' i]", ".completed",
-                    "[class*='confirm' i]", ".done", "[class*='done' i]"
+                    ".thank-you", "[class*='thank' i]", ".completed"
                 ]
                 
                 for selector in success_selectors:
@@ -335,7 +293,6 @@ class QuintoAndarAutomation:
                     except:
                         continue
                 
-                # Se não houver indicadores explícitos, assumir sucesso se não houver erros
                 error_selectors = [".error", ".alert", "[class*='error' i]"]
                 has_errors = False
                 for selector in error_selectors:
@@ -369,25 +326,25 @@ def log_message(message):
     log_entry = f"[{timestamp}] {message}"
     automation_status['logs'].append(log_entry)
     
-    # Manter apenas os últimos 100 logs para evitar uso excessivo de memória
     if len(automation_status['logs']) > 100:
         automation_status['logs'] = automation_status['logs'][-100:]
     
     print(log_entry)
 
 def process_excel_data(file_path):
-    """Processa arquivo Excel e retorna dados"""
+    """Processa arquivo Excel usando openpyxl (SEM PANDAS)"""
     try:
-        # Tentar ler Excel com diferentes engines
-        try:
-            df = pd.read_excel(file_path, engine='openpyxl')
-        except:
-            try:
-                df = pd.read_excel(file_path, engine='xlrd')
-            except:
-                df = pd.read_excel(file_path)
-
-        # Mapear colunas da planilha com mais variações
+        # Carregar workbook
+        wb = load_workbook(file_path, read_only=True)
+        ws = wb.active
+        
+        # Ler header (primeira linha)
+        headers = []
+        for cell in ws[1]:
+            if cell.value:
+                headers.append(str(cell.value).strip())
+        
+        # Mapear colunas
         column_mapping = {
             'endereco': ['Endereço', 'endereco', 'address', 'Address', 'ENDERECO', 'ENDEREÇO', 'Rua', 'rua'],
             'numero': ['Número', 'numero', 'number', 'Number', 'NUMERO', 'NÚMERO', 'Num', 'num', 'Nº'],
@@ -396,22 +353,35 @@ def process_excel_data(file_path):
             'telefone': ['Celular', 'Telefone', 'celular', 'telefone', 'phone', 'Phone', 'CELULAR', 'TELEFONE', 'Tel', 'tel', 'Cel', 'cel'],
             'email': ['E-mail', 'Email', 'email', 'EMAIL', 'E-MAIL', 'Mail', 'mail', 'E_mail']
         }
-
+        
+        # Encontrar índices das colunas
+        column_indexes = {}
+        for key, possible_names in column_mapping.items():
+            for i, header in enumerate(headers):
+                if header in possible_names:
+                    column_indexes[key] = i
+                    break
+        
+        # Processar dados
         data_list = []
-        for index, row in df.iterrows():
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not any(row):  # Pular linhas vazias
+                continue
+                
             record = {}
-            for key, possible_columns in column_mapping.items():
-                record[key] = ''
-                for col in possible_columns:
-                    if col in df.columns and pd.notna(row[col]) and str(row[col]).strip():
-                        record[key] = str(row[col]).strip()
-                        break
-
-            # Filtrar registros válidos (obrigatórios: endereço, telefone, proprietário)
+            for key, col_index in column_indexes.items():
+                if col_index < len(row) and row[col_index] is not None:
+                    record[key] = str(row[col_index]).strip()
+                else:
+                    record[key] = ''
+            
+            # Filtrar registros válidos
             if record.get('endereco') and record.get('telefone') and record.get('proprietario'):
                 data_list.append(record)
-
+        
+        wb.close()
         return data_list
+        
     except Exception as e:
         log_message(f"❌ Erro ao processar Excel: {str(e)}")
         return []
@@ -421,7 +391,6 @@ def run_automation(file_path):
     global automation_status
 
     try:
-        # Reset status
         automation_status['running'] = True
         automation_status['current_record'] = 0
         automation_status['success_count'] = 0
@@ -430,7 +399,6 @@ def run_automation(file_path):
 
         log_message("🚀 Iniciando automação de cadastros...")
 
-        # Processar dados do Excel
         data_list = process_excel_data(file_path)
         automation_status['total_records'] = len(data_list)
 
@@ -440,7 +408,6 @@ def run_automation(file_path):
 
         log_message(f"📊 {len(data_list)} registros encontrados para processamento")
 
-        # Configurar automação
         automation = QuintoAndarAutomation()
         if not automation.setup_driver():
             log_message("❌ Erro ao configurar navegador Chrome")
@@ -453,22 +420,19 @@ def run_automation(file_path):
 
         log_message("✅ Navegador configurado e site acessado com sucesso")
 
-        # Processar cada registro
         for i, record in enumerate(data_list, 1):
-            if not automation_status['running']:  # Verificar se foi cancelado
+            if not automation_status['running']:
                 break
                 
             automation_status['current_record'] = i
             log_message(f"🔄 Processando registro {i}/{len(data_list)}: {record['proprietario']}")
 
             try:
-                # Verificar se telefone já existe
                 if automation.check_phone_exists(record['telefone']):
                     log_message(f"⚠️ Telefone já cadastrado, pulando: {record['telefone']}")
                     automation_status['error_count'] += 1
                     continue
 
-                # Preencher formulário
                 if automation.fill_property_form(record):
                     if automation.submit_form():
                         log_message(f"✅ Cadastro realizado com sucesso: {record['proprietario']}")
@@ -480,7 +444,6 @@ def run_automation(file_path):
                     log_message(f"❌ Erro ao preencher formulário: {record['proprietario']}")
                     automation_status['error_count'] += 1
 
-                # Pausa entre registros
                 time.sleep(3)
 
             except Exception as e:
@@ -495,14 +458,11 @@ def run_automation(file_path):
         log_message(f"❌ Erro geral na automação: {str(e)}")
     finally:
         automation_status['running'] = False
-        # Limpar arquivo após processamento
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)
         except:
             pass
-
-# ========== ROTAS FLASK ==========
 
 @app.route('/')
 def index():
@@ -551,11 +511,9 @@ def upload_file():
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
 
-        # Verificar se arquivo foi salvo corretamente
         if not os.path.exists(file_path):
             return jsonify({'error': 'Erro ao salvar arquivo. Tente novamente.'}), 500
 
-        # Iniciar automação em thread separada
         thread = threading.Thread(target=run_automation, args=(file_path,))
         thread.daemon = True
         thread.start()
@@ -570,12 +528,10 @@ def upload_file():
 
 @app.route('/status')
 def status():
-    """Retorna status atual da automação"""
     return jsonify(automation_status)
 
 @app.route('/stop')
 def stop_automation():
-    """Para a automação em execução"""
     if not session.get('logged_in'):
         return jsonify({'error': 'Não autorizado'}), 401
     
@@ -590,17 +546,13 @@ def logout():
 
 @app.route('/health')
 def health_check():
-    """Health check para monitoramento"""
     return jsonify({
         'status': 'healthy', 
         'timestamp': datetime.now().isoformat(),
         'running': automation_status['running']
     })
 
-# ========== CONFIGURAÇÃO DE PRODUÇÃO ==========
-
 if __name__ == '__main__':
-    # Configuração para produção
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_ENV', 'production') != 'production'
     
