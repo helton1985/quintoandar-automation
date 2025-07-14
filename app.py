@@ -332,8 +332,10 @@ def log_message(message):
     print(log_entry)
 
 def process_excel_data(file_path):
-    """Processa arquivo Excel usando openpyxl (SEM PANDAS)"""
+    """Processa arquivo Excel com mapeamento mais flexível"""
     try:
+        log_message(f"📄 Carregando arquivo: {file_path}")
+        
         # Carregar workbook
         wb = load_workbook(file_path, read_only=True)
         ws = wb.active
@@ -344,46 +346,102 @@ def process_excel_data(file_path):
             if cell.value:
                 headers.append(str(cell.value).strip())
         
-        # Mapear colunas
+        log_message(f"📋 Colunas encontradas: {headers}")
+        
+        # Mapear colunas com busca mais flexível
         column_mapping = {
-            'endereco': ['Endereço', 'endereco', 'address', 'Address', 'ENDERECO', 'ENDEREÇO', 'Rua', 'rua'],
-            'numero': ['Número', 'numero', 'number', 'Number', 'NUMERO', 'NÚMERO', 'Num', 'num', 'Nº'],
-            'complemento': ['Complemento', 'complemento', 'complement', 'Complement', 'COMPLEMENTO', 'Compl', 'compl'],
-            'proprietario': ['Proprietário', 'proprietario', 'owner', 'Owner', 'nome', 'Nome', 'PROPRIETARIO', 'PROPRIETÁRIO', 'NOME'],
-            'telefone': ['Celular', 'Telefone', 'celular', 'telefone', 'phone', 'Phone', 'CELULAR', 'TELEFONE', 'Tel', 'tel', 'Cel', 'cel'],
-            'email': ['E-mail', 'Email', 'email', 'EMAIL', 'E-MAIL', 'Mail', 'mail', 'E_mail']
+            'endereco': ['endereço', 'endereco', 'address', 'rua', 'logradouro', 'addr'],
+            'numero': ['número', 'numero', 'number', 'num', 'nº', 'n°'],
+            'complemento': ['complemento', 'complement', 'compl', 'apto', 'apartamento'],
+            'proprietario': ['proprietário', 'proprietario', 'owner', 'nome', 'cliente', 'indicado'],
+            'telefone': ['celular', 'telefone', 'phone', 'tel', 'cel', 'fone', 'contato'],
+            'email': ['e-mail', 'email', 'mail', 'correio']
         }
         
-        # Encontrar índices das colunas
+        # Encontrar índices das colunas (busca case-insensitive)
         column_indexes = {}
         for key, possible_names in column_mapping.items():
             for i, header in enumerate(headers):
-                if header in possible_names:
-                    column_indexes[key] = i
+                header_lower = header.lower().strip()
+                for possible_name in possible_names:
+                    if possible_name.lower() in header_lower or header_lower in possible_name.lower():
+                        column_indexes[key] = i
+                        log_message(f"✅ Mapeado '{key}' → coluna '{header}' (índice {i})")
+                        break
+                if key in column_indexes:
                     break
+        
+        log_message(f"🗂️ Mapeamento final: {column_indexes}")
         
         # Processar dados
         data_list = []
-        for row in ws.iter_rows(min_row=2, values_only=True):
+        row_count = 0
+        
+        for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
             if not any(row):  # Pular linhas vazias
                 continue
                 
+            row_count += 1
             record = {}
+            
+            # Extrair dados baseado no mapeamento
             for key, col_index in column_indexes.items():
                 if col_index < len(row) and row[col_index] is not None:
-                    record[key] = str(row[col_index]).strip()
+                    value = str(row[col_index]).strip()
+                    record[key] = value if value and value.lower() not in ['none', 'null', ''] else ''
                 else:
                     record[key] = ''
             
-            # Filtrar registros válidos
-            if record.get('endereco') and record.get('telefone') and record.get('proprietario'):
+            # Se não tem mapeamento, tenta por posição (fallback)
+            if not column_indexes:
+                log_message("⚠️ Usando mapeamento por posição como fallback")
+                if len(row) >= 3:
+                    record = {
+                        'endereco': str(row[0]).strip() if row[0] else '',
+                        'numero': str(row[1]).strip() if row[1] else '',
+                        'complemento': str(row[2]).strip() if len(row) > 2 and row[2] else '',
+                        'proprietario': str(row[3]).strip() if len(row) > 3 and row[3] else '',
+                        'telefone': str(row[4]).strip() if len(row) > 4 and row[4] else '',
+                        'email': str(row[5]).strip() if len(row) > 5 and row[5] else ''
+                    }
+            
+            # Log primeiro registro para debug
+            if row_count == 1:
+                log_message(f"📝 Primeiro registro: {record}")
+            
+            # Verificar se registro tem dados obrigatórios
+            endereco = record.get('endereco', '').strip()
+            telefone = record.get('telefone', '').strip()
+            proprietario = record.get('proprietario', '').strip()
+            
+            if endereco and telefone and proprietario:
                 data_list.append(record)
+                if row_count <= 3:  # Log primeiros registros
+                    log_message(f"✅ Registro {row_count} válido: {proprietario}")
+            else:
+                if row_count <= 3:  # Log problemas nos primeiros registros
+                    log_message(f"❌ Registro {row_count} inválido - Endereço: '{endereco}', Telefone: '{telefone}', Proprietário: '{proprietario}'")
         
         wb.close()
+        
+        log_message(f"📊 Processamento concluído: {len(data_list)} registros válidos de {row_count} total")
+        
+        # Se não encontrou nada, mostrar estrutura do arquivo para debug
+        if not data_list and headers:
+            log_message(f"🔍 DEBUG - Estrutura do arquivo:")
+            log_message(f"Headers: {headers}")
+            # Mostrar primeira linha de dados
+            for row_num, row in enumerate(ws.iter_rows(min_row=2, max_row=3, values_only=True), 2):
+                if any(row):
+                    log_message(f"Linha {row_num}: {[str(cell)[:50] if cell else '' for cell in row]}")
+                    break
+        
         return data_list
         
     except Exception as e:
         log_message(f"❌ Erro ao processar Excel: {str(e)}")
+        import traceback
+        log_message(f"🔍 Traceback: {traceback.format_exc()}")
         return []
 
 def run_automation(file_path):
