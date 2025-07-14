@@ -37,7 +37,7 @@ class QuintoAndarAutomation:
         self.driver = None
         self.wait = None
 
-    def setup_driver(self):
+    setup_driver - Versão Railway Otimizada
         """Configura o driver do Chrome para produção"""
         try:
             chrome_options = Options()
