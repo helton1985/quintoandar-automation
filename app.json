@@ -1,0 +1,26 @@
+{
+  "name": "QuintoAndar Automation",
+  "description": "Sistema de automação para cadastros QuintoAndar",
+  "keywords": ["flask", "selenium", "automation", "quintoandar"],
+  "buildpacks": [
+    {
+      "url": "https://github.com/heroku/heroku-buildpack-google-chrome"
+    },
+    {
+      "url": "https://github.com/heroku/heroku-buildpack-chromedriver"
+    },
+    {
+      "url": "heroku/python"
+    }
+  ],
+  "env": {
+    "SECRET_KEY": {
+      "description": "Secret key for Flask sessions",
+      "value": "helton1985_21081985@_secret_key_production"
+    },
+    "FLASK_ENV": {
+      "description": "Flask environment",
+      "value": "production"
+    }
+  }
+}
