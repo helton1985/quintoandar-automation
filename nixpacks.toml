@@ -1,11 +1,1 @@
-[phases.setup]
-nixPkgs = ['python3', 'pip', 'chromium', 'chromedriver']
 
-[phases.install]
-cmds = ['pip install -r requirements.txt']
-
-[phases.build]
-cmds = ['echo "Build completed"']
-
-[start]
-cmd = 'gunicorn app:app'
