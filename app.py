@@ -4,38 +4,59 @@ import os
 import time
 import threading
 import json
-import random
 from datetime import datetime
 from openpyxl import load_workbook
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.service import Service
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'helton1985_21081985@_secret_key')
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+app.secret_key = os.environ.get('SECRET_KEY', 'helton1985_21081985@_secret_key_production')
+
+# Configurações
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
+MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
 # Criar diretório de uploads se não existir
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Variáveis globais para controle
+automation_thread = None
 automation_status = {
     'running': False,
+    'progress': 0,
     'current_record': 0,
     'total_records': 0,
     'success_count': 0,
     'error_count': 0,
-    'logs': []
+    'logs': [],
+    'start_time': None,
+    'duplicate_phones': []
 }
 
-def log_message(message):
-    """Adiciona mensagem ao log"""
-    timestamp = datetime.now().strftime("%H:%M:%S")
+def log_message(message, level='info'):
+    """Adiciona mensagem aos logs com timestamp"""
+    timestamp = datetime.now().strftime('%H:%M:%S')
     log_entry = f"[{timestamp}] {message}"
     automation_status['logs'].append(log_entry)
+    print(log_entry)
     
+    # Manter apenas últimos 100 logs
     if len(automation_status['logs']) > 100:
         automation_status['logs'] = automation_status['logs'][-100:]
-    
-    print(log_entry)
+
+def allowed_file(filename):
+    """Verifica se arquivo tem extensão permitida"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def process_excel_data(file_path):
     """Processa arquivo Excel com mapeamento mais flexível"""
@@ -46,309 +67,421 @@ def process_excel_data(file_path):
         wb = load_workbook(file_path, read_only=True)
         ws = wb.active
         
-        # Ler header (primeira linha)
+        # Ler cabeçalhos
         headers = []
         for cell in ws[1]:
-            if cell.value:
-                headers.append(str(cell.value).strip())
+            headers.append(cell.value if cell.value else '')
         
         log_message(f"📋 Colunas encontradas: {headers}")
         
-        # Mapear colunas com busca mais flexível
+        # Mapeamento de colunas com múltiplas possibilidades
         column_mapping = {
-            'endereco': ['endereço', 'endereco', 'address', 'rua', 'logradouro', 'addr'],
-            'numero': ['número', 'numero', 'number', 'num', 'nº', 'n°'],
-            'complemento': ['complemento', 'complement', 'compl', 'apto', 'apartamento'],
-            'proprietario': ['proprietário', 'proprietario', 'owner', 'nome', 'cliente', 'indicado'],
-            'telefone': ['celular', 'telefone', 'phone', 'tel', 'cel', 'fone', 'contato'],
-            'email': ['e-mail', 'email', 'mail', 'correio']
+            'endereco': ['endereço', 'endereco', 'address', 'rua', 'logradouro'],
+            'numero': ['número', 'numero', 'number', 'num', 'n'],
+            'complemento': ['complemento', 'compl', 'complement'],
+            'proprietario': ['proprietário', 'proprietario', 'nome', 'owner', 'name'],
+            'telefone': ['telefone', 'celular', 'phone', 'fone', 'celular/telefone'],
+            'email': ['email', 'e-mail', 'mail', 'correio']
         }
         
-        # Encontrar índices das colunas (busca case-insensitive)
-        column_indexes = {}
+        # Mapear colunas
+        mapped_columns = {}
         for key, possible_names in column_mapping.items():
             for i, header in enumerate(headers):
-                header_lower = header.lower().strip()
-                for possible_name in possible_names:
-                    if possible_name.lower() in header_lower or header_lower in possible_name.lower():
-                        column_indexes[key] = i
-                        log_message(f"✅ Mapeado '{key}' → coluna '{header}' (índice {i})")
-                        break
-                if key in column_indexes:
+                if header and any(name.lower() in header.lower() for name in possible_names):
+                    mapped_columns[key] = i
+                    log_message(f"✅ Mapeado '{key}' → coluna '{header}' (índice {i})")
                     break
         
-        log_message(f"🗂️ Mapeamento final: {column_indexes}")
+        log_message(f"🗂️ Mapeamento final: {mapped_columns}")
         
         # Processar dados
-        data_list = []
-        row_count = 0
-        
+        records = []
         for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-            if not any(row):  # Pular linhas vazias
+            if not row or all(cell is None or cell == '' for cell in row):
                 continue
-                
-            row_count += 1
+            
+            # Extrair dados conforme mapeamento
             record = {}
+            for field, col_idx in mapped_columns.items():
+                if col_idx < len(row):
+                    value = row[col_idx]
+                    record[field] = str(value).strip() if value else ''
             
-            # Extrair dados baseado no mapeamento
-            for key, col_index in column_indexes.items():
-                if col_index < len(row) and row[col_index] is not None:
-                    value = str(row[col_index]).strip()
-                    record[key] = value if value and value.lower() not in ['none', 'null', ''] else ''
-                else:
-                    record[key] = ''
-            
-            # Se não tem mapeamento, tenta por posição (fallback)
-            if not column_indexes:
-                log_message("⚠️ Usando mapeamento por posição como fallback")
-                if len(row) >= 3:
-                    record = {
-                        'endereco': str(row[0]).strip() if row[0] else '',
-                        'numero': str(row[1]).strip() if row[1] else '',
-                        'complemento': str(row[2]).strip() if len(row) > 2 and row[2] else '',
-                        'proprietario': str(row[3]).strip() if len(row) > 3 and row[3] else '',
-                        'telefone': str(row[4]).strip() if len(row) > 4 and row[4] else '',
-                        'email': str(row[5]).strip() if len(row) > 5 and row[5] else ''
-                    }
-            
-            # Log primeiro registro para debug
-            if row_count == 1:
-                log_message(f"📝 Primeiro registro: {record}")
-            
-            # Verificar se registro tem dados obrigatórios
-            endereco = record.get('endereco', '').strip()
-            telefone = record.get('telefone', '').strip()
-            proprietario = record.get('proprietario', '').strip()
-            
-            if endereco and telefone and proprietario:
-                data_list.append(record)
-                if row_count <= 3:  # Log primeiros registros
-                    log_message(f"✅ Registro {row_count} válido: {proprietario}")
-            else:
-                if row_count <= 3:  # Log problemas nos primeiros registros
-                    log_message(f"❌ Registro {row_count} inválido - Endereço: '{endereco}', Telefone: '{telefone}', Proprietário: '{proprietario}'")
+            # Validar registro
+            if record.get('proprietario') and record.get('endereco'):
+                records.append(record)
+                if len(records) == 1:
+                    log_message(f"📝 Primeiro registro: {record}")
+                if len(records) <= 3:
+                    log_message(f"✅ Registro {len(records)} válido: {record.get('proprietario')}")
         
-        wb.close()
-        
-        log_message(f"📊 Processamento concluído: {len(data_list)} registros válidos de {row_count} total")
-        
-        return data_list
+        log_message(f"📊 Processamento concluído: {len(records)} registros válidos de {row_num-1} total")
+        return records
         
     except Exception as e:
         log_message(f"❌ Erro ao processar Excel: {str(e)}")
         return []
 
-def simulate_automation(data_list):
-    """Simula automação com logs realistas"""
-    global automation_status
+class QuintoAndarAutomation:
+    def __init__(self):
+        self.driver = None
+        self.wait = None
+        
+    def setup_driver(self):
+        """Configura o driver do Chrome para produção"""
+        try:
+            log_message("🔧 Configurando navegador Chrome...")
+            
+            # Configurações do Chrome
+            chrome_options = Options()
+            chrome_options.add_argument('--headless')  # Executar sem interface gráfica
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument('--disable-plugins')
+            chrome_options.add_argument('--disable-images')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+            
+            # Configurar service
+            service = Service(ChromeDriverManager().install())
+            
+            # Criar driver
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            self.wait = WebDriverWait(self.driver, 15)
+            
+            log_message("✅ Chrome WebDriver configurado com sucesso!")
+            return True
+            
+        except Exception as e:
+            log_message(f"❌ Erro ao configurar Chrome: {str(e)}")
+            return False
     
-    try:
-        log_message("🚀 Iniciando sistema de automação...")
-        time.sleep(2)
-        
-        log_message("🔧 Configurando navegador virtual...")
-        time.sleep(1)
-        
-        log_message("✅ Navegador configurado com sucesso!")
-        time.sleep(1)
-        
-        log_message("🌐 Acessando site QuintoAndar...")
-        time.sleep(2)
-        
-        log_message("✅ Site acessado com sucesso!")
-        time.sleep(1)
-        
-        log_message("🏁 Iniciando processamento dos registros...")
-        
-        for i, record in enumerate(data_list, 1):
-            if not automation_status['running']:
-                break
-                
-            automation_status['current_record'] = i
-            log_message(f"🔄 Processando registro {i}/{len(data_list)}: {record['proprietario']}")
+    def access_site(self):
+        """Acessa o site do QuintoAndar"""
+        try:
+            log_message("🌐 Acessando site QuintoAndar...")
+            self.driver.get("https://indicaai.quintoandar.com.br/")
             
-            # Simular tempo de processamento
-            time.sleep(random.uniform(2, 4))
+            # Aguardar carregamento
+            time.sleep(5)
             
-            # Simular verificação de telefone
-            telefone = record['telefone'].replace('+55', '').replace('55', '').strip()
-            log_message(f"📞 Verificando telefone: {telefone}")
-            time.sleep(1)
-            
-            # 15% chance de telefone já cadastrado
-            if random.random() < 0.15:
-                log_message(f"⚠️ Telefone já cadastrado, pulando: {telefone}")
-                automation_status['error_count'] += 1
-                continue
-            
-            # Simular preenchimento do formulário
-            endereco = f"{record['endereco']}, {record['numero']}"
-            log_message(f"📍 Preenchendo endereço: {endereco}")
-            time.sleep(1)
-            
-            log_message(f"👤 Preenchendo proprietário: {record['proprietario']}")
-            time.sleep(0.5)
-            
-            if record.get('email'):
-                log_message(f"📧 Preenchendo email: {record['email']}")
-                time.sleep(0.5)
-            
-            # Simular submissão
-            log_message("📤 Enviando formulário...")
-            time.sleep(1)
-            
-            # 90% chance de sucesso
-            if random.random() < 0.90:
-                log_message(f"✅ Cadastro realizado com sucesso: {record['proprietario']}")
-                automation_status['success_count'] += 1
+            # Verificar se carregou
+            if "QuintoAndar" in self.driver.title or "indica" in self.driver.title.lower():
+                log_message("✅ Site acessado com sucesso!")
+                return True
             else:
-                log_message(f"❌ Erro ao submeter formulário: {record['proprietario']}")
-                automation_status['error_count'] += 1
+                log_message("❌ Erro: Site não carregou corretamente")
+                return False
+                
+        except Exception as e:
+            log_message(f"❌ Erro ao acessar site: {str(e)}")
+            return False
+    
+    def fill_form(self, record):
+        """Preenche formulário com dados do registro"""
+        try:
+            log_message(f"📝 Preenchendo formulário: {record.get('proprietario')}")
+            
+            # Aguardar formulário carregar
+            time.sleep(3)
+            
+            # Preencher endereço
+            if record.get('endereco'):
+                try:
+                    endereco_field = self.wait.until(
+                        EC.presence_of_element_located((By.NAME, "endereco"))
+                    )
+                    endereco_field.clear()
+                    endereco_field.send_keys(record['endereco'])
+                    log_message(f"✅ Endereço preenchido: {record['endereco']}")
+                    time.sleep(1)
+                except:
+                    log_message(f"⚠️ Campo endereço não encontrado")
+            
+            # Preencher número
+            if record.get('numero'):
+                try:
+                    numero_field = self.driver.find_element(By.NAME, "numero")
+                    numero_field.clear()
+                    numero_field.send_keys(record['numero'])
+                    log_message(f"✅ Número preenchido: {record['numero']}")
+                    time.sleep(0.5)
+                except:
+                    log_message(f"⚠️ Campo número não encontrado")
+            
+            # Preencher complemento
+            if record.get('complemento'):
+                try:
+                    complemento_field = self.driver.find_element(By.NAME, "complemento")
+                    complemento_field.clear()
+                    complemento_field.send_keys(record['complemento'])
+                    log_message(f"✅ Complemento preenchido: {record['complemento']}")
+                    time.sleep(0.5)
+                except:
+                    log_message(f"⚠️ Campo complemento não encontrado")
+            
+            # Preencher proprietário
+            if record.get('proprietario'):
+                try:
+                    proprietario_field = self.driver.find_element(By.NAME, "proprietario")
+                    proprietario_field.clear()
+                    proprietario_field.send_keys(record['proprietario'])
+                    log_message(f"✅ Proprietário preenchido: {record['proprietario']}")
+                    time.sleep(0.5)
+                except:
+                    log_message(f"⚠️ Campo proprietário não encontrado")
+            
+            # Preencher telefone
+            if record.get('telefone'):
+                try:
+                    telefone_field = self.driver.find_element(By.NAME, "telefone")
+                    telefone_field.clear()
+                    telefone_field.send_keys(record['telefone'])
+                    log_message(f"✅ Telefone preenchido: {record['telefone']}")
+                    time.sleep(0.5)
+                except:
+                    log_message(f"⚠️ Campo telefone não encontrado")
+            
+            # Preencher email
+            if record.get('email'):
+                try:
+                    email_field = self.driver.find_element(By.NAME, "email")
+                    email_field.clear()
+                    email_field.send_keys(record['email'])
+                    log_message(f"✅ Email preenchido: {record['email']}")
+                    time.sleep(0.5)
+                except:
+                    log_message(f"⚠️ Campo email não encontrado")
+            
+            # Submeter formulário
+            try:
+                submit_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit'], input[type='submit']")
+                submit_button.click()
+                log_message("✅ Formulário enviado")
+                
+                # Aguardar resposta
+                time.sleep(4)
+                
+                # Verificar se foi cadastrado com sucesso
+                page_source = self.driver.page_source.lower()
+                if "sucesso" in page_source or "cadastrado" in page_source or "obrigado" in page_source:
+                    log_message(f"✅ Cadastro realizado com sucesso: {record.get('proprietario')}")
+                    return True
+                else:
+                    log_message(f"⚠️ Possível erro no cadastro: {record.get('proprietario')}")
+                    return False
+                    
+            except Exception as e:
+                log_message(f"❌ Erro ao enviar formulário: {str(e)}")
+                return False
+                
+        except TimeoutException:
+            log_message(f"⏱️ Timeout no cadastro: {record.get('proprietario')}")
+            return False
+        except Exception as e:
+            log_message(f"❌ Erro no cadastro: {str(e)}")
+            return False
+    
+    def process_records(self, records):
+        """Processa lista de registros"""
+        global automation_status
+        
+        log_message(f"🚀 Iniciando processamento de {len(records)} registros")
+        
+        # Configurar driver
+        if not self.setup_driver():
+            log_message("❌ Erro ao configurar Chrome - interrompendo")
+            automation_status['running'] = False
+            return
+        
+        # Acessar site
+        if not self.access_site():
+            log_message("❌ Erro ao acessar site - interrompendo")
+            automation_status['running'] = False
+            return
+        
+        # Verificar telefones duplicados
+        phones = [record.get('telefone', '') for record in records]
+        phone_counts = {}
+        for phone in phones:
+            if phone:
+                phone_counts[phone] = phone_counts.get(phone, 0) + 1
+        
+        duplicates = [phone for phone, count in phone_counts.items() if count > 1]
+        if duplicates:
+            log_message(f"⚠️ Encontrados {len(duplicates)} telefones duplicados")
+            automation_status['duplicate_phones'] = duplicates
+        
+        # Processar registros
+        success_count = 0
+        error_count = 0
+        
+        for i, record in enumerate(records, 1):
+            if not automation_status['running']:
+                log_message("⏹️ Automação interrompida pelo usuário")
+                break
+            
+            # Atualizar status
+            automation_status['current_record'] = i
+            automation_status['progress'] = (i / len(records)) * 100
+            
+            log_message(f"📋 Processando registro {i}/{len(records)}")
+            
+            # Verificar telefone duplicado
+            if record.get('telefone') in duplicates:
+                log_message(f"⚠️ Telefone duplicado detectado: {record.get('telefone')}")
+            
+            # Processar registro
+            if self.fill_form(record):
+                success_count += 1
+                automation_status['success_count'] = success_count
+            else:
+                error_count += 1
+                automation_status['error_count'] = error_count
             
             # Pausa entre registros
-            time.sleep(1)
+            time.sleep(3)
         
-        log_message(f"🏁 Automação finalizada!")
-        log_message(f"📊 Resultados: ✅ {automation_status['success_count']} sucessos | ❌ {automation_status['error_count']} erros")
-        log_message("💼 Sistema pronto para nova automação!")
-        
-    except Exception as e:
-        log_message(f"❌ Erro na automação: {str(e)}")
-    finally:
+        # Finalizar
+        log_message(f"🎉 Processamento concluído! Sucessos: {success_count}, Erros: {error_count}")
         automation_status['running'] = False
-
-def run_automation(file_path):
-    """Executa a automação (versão demo)"""
-    global automation_status
-
-    try:
-        automation_status['running'] = True
-        automation_status['current_record'] = 0
-        automation_status['success_count'] = 0
-        automation_status['error_count'] = 0
-        automation_status['logs'] = []
-
-        # Processar dados do Excel
-        data_list = process_excel_data(file_path)
-        automation_status['total_records'] = len(data_list)
-
-        if not data_list:
-            log_message("❌ Nenhum dado válido encontrado no arquivo Excel")
-            return
-
-        log_message(f"📊 {len(data_list)} registros encontrados para processamento")
         
-        # Simular automação
-        simulate_automation(data_list)
-
-    except Exception as e:
-        log_message(f"❌ Erro geral na automação: {str(e)}")
-    finally:
+        # Fechar driver
+        if self.driver:
+            self.driver.quit()
+            log_message("🔧 Navegador Chrome fechado")
+    
+    def stop_automation(self):
+        """Para a automação"""
+        global automation_status
         automation_status['running'] = False
-        # Limpar arquivo após processamento
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        except:
-            pass
+        
+        if self.driver:
+            self.driver.quit()
+            log_message("🔧 Navegador Chrome fechado")
 
+# Rotas Flask
 @app.route('/')
 def index():
+    """Página de login"""
     return render_template('index.html')
 
 @app.route('/login', methods=['POST'])
 def login():
-    username = request.form.get('username', '').strip()
-    password = request.form.get('password', '').strip()
-
+    """Processa login"""
+    username = request.form.get('username')
+    password = request.form.get('password')
+    
+    # Verificar credenciais
     if username == 'helton1985' and password == '21081985@':
         session['logged_in'] = True
-        session.permanent = True
+        log_message(f"✅ Login realizado: {username}")
         return redirect(url_for('dashboard'))
     else:
-        return render_template('index.html', error='Credenciais inválidas. Verifique usuário e senha.')
+        log_message(f"❌ Tentativa de login inválida: {username}")
+        return render_template('index.html', error='Credenciais inválidas')
 
 @app.route('/dashboard')
 def dashboard():
+    """Dashboard principal"""
     if not session.get('logged_in'):
         return redirect(url_for('index'))
+    
     return render_template('dashboard.html')
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    """Processa upload de arquivo"""
+    global automation_thread, automation_status
+    
     if not session.get('logged_in'):
-        return jsonify({'error': 'Não autorizado. Faça login primeiro.'}), 401
-
-    if automation_status['running']:
-        return jsonify({'error': 'Automação já está em execução. Aguarde finalizar.'}), 400
-
+        return jsonify({'error': 'Não autorizado'}), 401
+    
     if 'file' not in request.files:
-        return jsonify({'error': 'Nenhum arquivo foi selecionado.'}), 400
-
+        return jsonify({'error': 'Nenhum arquivo enviado'}), 400
+    
     file = request.files['file']
     if file.filename == '':
-        return jsonify({'error': 'Nenhum arquivo foi selecionado.'}), 400
-
-    if not file.filename.lower().endswith(('.xlsx', '.xls')):
-        return jsonify({'error': 'Apenas arquivos Excel (.xlsx, .xls) são permitidos.'}), 400
-
-    try:
-        filename = secure_filename(file.filename)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{timestamp}_{filename}"
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(file_path)
-
-        if not os.path.exists(file_path):
-            return jsonify({'error': 'Erro ao salvar arquivo. Tente novamente.'}), 500
-
-        # Iniciar automação em thread separada
-        thread = threading.Thread(target=run_automation, args=(file_path,))
-        thread.daemon = True
-        thread.start()
-
-        return jsonify({
-            'success': True, 
-            'message': 'Arquivo carregado com sucesso! Automação iniciada.'
-        })
+        return jsonify({'error': 'Nenhum arquivo selecionado'}), 400
     
-    except Exception as e:
-        return jsonify({'error': f'Erro ao processar arquivo: {str(e)}'}), 500
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Tipo de arquivo não permitido'}), 400
+    
+    # Salvar arquivo
+    filename = secure_filename(file.filename)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"{timestamp}_{filename}"
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+    
+    log_message(f"📁 Arquivo salvo: {filename}")
+    
+    # Processar dados
+    records = process_excel_data(file_path)
+    
+    if not records:
+        return jsonify({'error': 'Nenhum dado válido encontrado no arquivo Excel'}), 400
+    
+    log_message(f"📊 {len(records)} registros encontrados para processamento")
+    
+    # Resetar status
+    automation_status = {
+        'running': True,
+        'progress': 0,
+        'current_record': 0,
+        'total_records': len(records),
+        'success_count': 0,
+        'error_count': 0,
+        'logs': automation_status['logs'],  # Manter logs existentes
+        'start_time': datetime.now().isoformat(),
+        'duplicate_phones': []
+    }
+    
+    # Iniciar automação em thread separada
+    automation = QuintoAndarAutomation()
+    automation_thread = threading.Thread(target=automation.process_records, args=(records,))
+    automation_thread.daemon = True
+    automation_thread.start()
+    
+    return jsonify({
+        'message': 'Automação iniciada com sucesso',
+        'total_records': len(records)
+    })
 
 @app.route('/status')
-def status():
+def get_status():
+    """Retorna status da automação"""
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Não autorizado'}), 401
+    
     return jsonify(automation_status)
 
-@app.route('/stop')
+@app.route('/stop', methods=['POST'])
 def stop_automation():
+    """Para a automação"""
+    global automation_status
+    
     if not session.get('logged_in'):
         return jsonify({'error': 'Não autorizado'}), 401
     
     automation_status['running'] = False
-    log_message("⏹️ Automação interrompida pelo usuário")
-    return jsonify({'success': True, 'message': 'Automação interrompida com sucesso'})
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('index'))
+    log_message("🛑 Automação interrompida pelo usuário")
+    
+    return jsonify({'message': 'Automação interrompida'})
 
 @app.route('/health')
 def health_check():
-    return jsonify({
-        'status': 'healthy', 
-        'timestamp': datetime.now().isoformat(),
-        'running': automation_status['running'],
-        'mode': 'demo'
-    })
+    """Health check endpoint"""
+    return jsonify({'status': 'healthy'})
+
+@app.route('/logout')
+def logout():
+    """Logout"""
+    session.clear()
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    debug_mode = os.environ.get('FLASK_ENV', 'production') != 'production'
-    
-    app.run(
-        debug=debug_mode,
-        host='0.0.0.0',
-        port=port,
-        threaded=True
-    )
+    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
